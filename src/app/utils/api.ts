@@ -17,6 +17,7 @@
 
 import { Branch, Indicator, Submission, BranchSettings, BranchAdmin, AppSettings } from '../types';
 import { includeConfiguredBranches } from './branchConfig';
+import { compressImage as compressImageFile } from './imageCompression';
 import {
   readSheetAsObjects,
   appendToSheet,
@@ -207,37 +208,6 @@ async function fileToBase64(file: File | Blob): Promise<string> {
     reader.onloadend = () => resolve(reader.result as string);
     reader.onerror = reject;
     reader.readAsDataURL(file);
-  });
-}
-
-// Helper: Compress image before upload
-async function compressImage(file: File, maxWidth: number = 800, quality: number = 0.7): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    img.onload = () => {
-      // Calculate new dimensions
-      let width = img.width;
-      let height = img.height;
-
-      if (width > maxWidth) {
-        height = (height * maxWidth) / width;
-        width = maxWidth;
-      }
-
-      canvas.width = width;
-      canvas.height = height;
-
-      // Draw and compress
-      ctx?.drawImage(img, 0, 0, width, height);
-      const compressed = canvas.toDataURL('image/jpeg', quality);
-      resolve(compressed);
-    };
-
-    img.onerror = reject;
-    img.src = URL.createObjectURL(file);
   });
 }
 
@@ -741,25 +711,8 @@ export const api = {
       console.log(`📝 Adding submission for branch ${branchId}...`);
 
       // Process photos: pisahkan foto dari data indikator
-      let photosData: any = {};    // full-size → Drive upload
-      let photosThumbs: any = {};  // 64px thumbnail → langsung di-embed ke cell Sheets
+      let photosData: any = {};    // compressed photos → Drive upload
       let cleanData: any = submission.data;
-
-      // 40x40 JPEG quality 0.2 → ~1-2KB base64 per foto, aman untuk cell limit Sheets (50k char)
-      const makeThumb = async (photo: File | Blob): Promise<string> => {
-        return new Promise((resolve) => {
-          const img = new Image();
-          const canvas = document.createElement('canvas');
-          img.onload = () => {
-            canvas.width = 40; canvas.height = 40;
-            const ctx = canvas.getContext('2d');
-            if (ctx) ctx.drawImage(img, 0, 0, 40, 40);
-            resolve(canvas.toDataURL('image/jpeg', 0.2));
-          };
-          img.onerror = () => resolve('');
-          img.src = URL.createObjectURL(photo as File);
-        });
-      };
 
       if (submission.data) {
         if (Array.isArray(submission.data)) {
@@ -769,20 +722,19 @@ export const api = {
             cleanData.push(rest);
             if (photos && Array.isArray(photos) && photos.length > 0) {
               const base64Photos: string[] = [];
-              const thumbPhotos: string[] = [];
               for (const photo of photos) {
                 if (photo instanceof File || photo instanceof Blob) {
-                  const base64 = await compressImage(photo as File, 800, 0.7);
+                  const base64 = await compressImageFile(photo, {
+                    maxWidth: 800,
+                    maxHeight: 800,
+                    quality: 0.7
+                  });
                   base64Photos.push(base64);
-                  const thumb = await makeThumb(photo as File);
-                  if (thumb) thumbPhotos.push(thumb);
                 } else if (typeof photo === 'string') {
                   base64Photos.push(photo);
-                  thumbPhotos.push(photo);
                 }
               }
               if (base64Photos.length > 0) photosData[item.id] = base64Photos;
-              if (thumbPhotos.length > 0) photosThumbs[item.id] = thumbPhotos;
             }
           }
         } else {
@@ -791,20 +743,19 @@ export const api = {
             const data = value as any;
             if (data?.photos && Array.isArray(data.photos)) {
               const base64Photos: string[] = [];
-              const thumbPhotos: string[] = [];
               for (const photo of data.photos) {
                 if (photo instanceof File || photo instanceof Blob) {
-                  const base64 = await compressImage(photo as File, 800, 0.7);
+                  const base64 = await compressImageFile(photo, {
+                    maxWidth: 800,
+                    maxHeight: 800,
+                    quality: 0.7
+                  });
                   base64Photos.push(base64);
-                  const thumb = await makeThumb(photo as File);
-                  if (thumb) thumbPhotos.push(thumb);
                 } else if (typeof photo === 'string') {
                   base64Photos.push(photo);
-                  thumbPhotos.push(photo);
                 }
               }
               if (base64Photos.length > 0) photosData[indicatorId] = base64Photos;
-              if (thumbPhotos.length > 0) photosThumbs[indicatorId] = thumbPhotos;
               cleanData[indicatorId] = { ...data, photos: [] };
             } else {
               cleanData[indicatorId] = data;
@@ -834,8 +785,7 @@ export const api = {
               createdAt: submission.createdAt,
               totalScore: submission.totalScore || 0,
               data: cleanData,
-              photos: photosData,       // full-size → Apps Script upload ke Drive
-              photosThumbs: photosThumbs, // 64px thumbnail → fallback jika Drive tidak dikonfigurasi
+              photos: photosData,       // compressed photos → Apps Script upload ke Drive
               notes: submission.notes
             }
           };

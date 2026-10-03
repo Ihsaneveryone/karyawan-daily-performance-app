@@ -25,57 +25,64 @@ export async function compressImage(
   const { maxWidth, maxHeight, quality } = { ...defaultOptions, ...options };
 
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
 
-    reader.onload = (e) => {
-      const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
 
-      img.onload = () => {
-        try {
-          // Calculate new dimensions
-          let width = img.width;
-          let height = img.height;
+      try {
+        let width = img.width;
+        let height = img.height;
 
-          if (width > maxWidth || height > maxHeight) {
-            const ratio = Math.min(maxWidth / width, maxHeight / height);
-            width = Math.floor(width * ratio);
-            height = Math.floor(height * ratio);
-          }
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.floor(width * ratio);
+          height = Math.floor(height * ratio);
+        }
 
-          // Create canvas and compress
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
 
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            reject(new Error('Failed to get canvas context'));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((compressedBlob) => {
+          if (!compressedBlob) {
+            reject(new Error('Failed to compress image'));
             return;
           }
 
-          // Draw and compress
-          ctx.drawImage(img, 0, 0, width, height);
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (typeof reader.result !== 'string') {
+              reject(new Error('Failed to read compressed image'));
+              return;
+            }
 
-          // Convert to base64 with compression
-          const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
-
-          // Log compression stats
-          const originalSize = (file.size / 1024).toFixed(2);
-          const compressedSize = (compressedBase64.length * 0.75 / 1024).toFixed(2);
-          console.log(`Image compressed: ${originalSize}KB → ${compressedSize}KB`);
-
-          resolve(compressedBase64);
-        } catch (error) {
-          reject(error);
-        }
-      };
-
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = e.target?.result as string;
+            console.log(
+              `Image compressed: ${(file.size / 1024).toFixed(2)}KB → ${(compressedBlob.size / 1024).toFixed(2)}KB`
+            );
+            resolve(reader.result);
+          };
+          reader.onerror = () => reject(new Error('Failed to read compressed image'));
+          reader.readAsDataURL(compressedBlob);
+        }, 'image/jpeg', quality);
+      } catch (error) {
+        reject(error);
+      }
     };
 
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Failed to load image'));
+    };
+    img.src = objectUrl;
   });
 }
 

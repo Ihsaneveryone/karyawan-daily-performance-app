@@ -18,17 +18,26 @@ export default function LoginPage({ branch, onLogin, onBack }: LoginPageProps) {
   const [nik, setNik] = useState('');
   const [nama, setNama] = useState('');
   const [isLookingUpName, setIsLookingUpName] = useState(false);
+  const [isValidatingUser, setIsValidatingUser] = useState(false);
   const [nameLookupError, setNameLookupError] = useState('');
   const isA321 = branch.id === 'A321';
   const isBranchAdminNik = nik.trim().toUpperCase() === branch.nik.toUpperCase();
   const isNameLookupLocked = isA321 && !isBranchAdminNik
-    && (isLookingUpName || (!!nik.trim() && !nameLookupError));
+    && (isLookingUpName || !!nik.trim());
   const [showForgotDialog, setShowForgotDialog] = useState(false);
   const [secretCode, setSecretCode] = useState('');
   const [settings, setSettings] = useState<any>(null);
   const [showEmployeeRanking, setShowEmployeeRanking] = useState(false);
   const [employeeRanking, setEmployeeRanking] = useState<any[]>([]);
   const [loadingRanking, setLoadingRanking] = useState(false);
+
+  const getA321LoginErrorMessage = (error: unknown) => {
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    if (message.includes('tidak ditemukan') || message.includes('not found') || message.includes('data nik')) {
+      return 'NIK tidak terdaftar. Silakan hubungi admin toko.';
+    }
+    return 'NIK tidak dapat diperiksa. Periksa koneksi internet lalu coba lagi.';
+  };
 
   // 🔄 Auto-load ranking when dialog opens
   useEffect(() => {
@@ -63,7 +72,7 @@ export default function LoginPage({ branch, onLogin, onBack }: LoginPageProps) {
         })
         .catch((error) => {
           if (!cancelled) {
-            setNameLookupError(error instanceof Error ? error.message : 'Nama untuk NIK ini tidak ditemukan');
+            setNameLookupError(getA321LoginErrorMessage(error));
           }
         })
         .finally(() => {
@@ -111,13 +120,37 @@ export default function LoginPage({ branch, onLogin, onBack }: LoginPageProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!nik.trim() || !nama.trim()) {
-      toast.error('NIK dan Nama harus diisi!');
+    if (!nik.trim()) {
+      toast.error('NIK harus diisi!');
+      return;
+    }
+
+    let loginName = nama.trim();
+    if (isA321) {
+      if (isValidatingUser) return;
+      setIsValidatingUser(true);
+      try {
+        const userRecord = await api.getA321UserByNik(nik.trim());
+        loginName = userRecord.name;
+        setNama(userRecord.name);
+        setNameLookupError('');
+      } catch (error) {
+        const message = getA321LoginErrorMessage(error);
+        setNameLookupError(message);
+        toast.error(message);
+        return;
+      } finally {
+        setIsValidatingUser(false);
+      }
+    }
+
+    if (!loginName) {
+      toast.error('Nama harus diisi!');
       return;
     }
 
     // Check if this is branch admin
-    const isBranchAdmin = nik === branch.nik && nama.toUpperCase() === branch.adminName.toUpperCase();
+    const isBranchAdmin = nik === branch.nik && loginName.toUpperCase() === branch.adminName.toUpperCase();
 
     // Check if admin name needs to be changed (monthly check)
     if (isBranchAdmin) {
@@ -175,12 +208,12 @@ export default function LoginPage({ branch, onLogin, onBack }: LoginPageProps) {
     onLogin({
       branchId: branch.id,
       nik: nik.trim(),
-      nama: nama.trim(),
+      nama: loginName,
       isBranchAdmin,
       isSuperAdmin: false
     });
 
-    toast.success(`Selamat datang, ${nama}!`, {
+    toast.success(`Selamat datang, ${loginName}!`, {
       duration: 3000
     });
   };
@@ -304,10 +337,10 @@ export default function LoginPage({ branch, onLogin, onBack }: LoginPageProps) {
 
           {/* Title - RESPONSIVE */}
           <h1 className="text-2xl md:text-4xl font-bold text-center bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-transparent mb-2">
-            {settings?.loginTitle || `DAILY INDICATORS ${branch.nik}`}
+            {isA321 ? 'DAILY INDICATORS A321' : settings?.loginTitle || `DAILY INDICATORS ${branch.nik}`}
           </h1>
           <p className="text-center text-gray-600 text-sm md:text-base mb-6 md:mb-8 px-2">
-            {settings?.loginSubtitle || 'Silakan masuk dengan NIK dan Nama Anda'}
+            {isA321 ? 'Silahkan Login dengan NIK anda' : settings?.loginSubtitle || 'Silakan masuk dengan NIK dan Nama Anda'}
           </p>
 
           {/* Form - RESPONSIVE */}
@@ -327,7 +360,7 @@ export default function LoginPage({ branch, onLogin, onBack }: LoginPageProps) {
                   <p className="text-xs text-blue-600 mt-1" role="status">Mencari nama berdasarkan NIK...</p>
                 )}
                 {isA321 && nameLookupError && (
-                  <p className="text-xs text-red-600 mt-1" role="alert">{nameLookupError}. Nama bisa diisi manual.</p>
+                  <p className="text-xs text-red-600 mt-1" role="alert">{nameLookupError}</p>
                 )}
               </div>
             </div>
@@ -354,9 +387,10 @@ export default function LoginPage({ branch, onLogin, onBack }: LoginPageProps) {
 
             <Button
               type="submit"
+              disabled={isValidatingUser}
               className="w-full h-12 md:h-14 text-base md:text-lg font-semibold bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-blue-700 rounded-xl shadow-lg"
             >
-              Login
+              {isValidatingUser ? 'Memeriksa NIK...' : 'Login'}
             </Button>
           </form>
 

@@ -177,28 +177,28 @@ api.getBranches().then(branches => {
 ### 5. **IMAGE COMPRESSION** 📸
 
 **Konsep:**
-Compress images **aggressively** untuk save bandwidth dan speed up upload.
+Compress images sebelum upload untuk mengurangi waktu encoding dan ukuran request.
 
 **Konfigurasi:**
 ```typescript
 const compressed = await compressImage(file, {
-  maxWidth: 600,    // Small size
-  maxHeight: 600,   // Small size
-  quality: 0.5,     // 50% quality (good enough!)
+  maxWidth: 400,
+  maxHeight: 400,
+  quality: 0.6,
 });
 ```
 
-**Results:**
-| Original Size | Compressed Size | Reduction |
-|--------------|-----------------|-----------|
-| 5 MB | 150 KB | **97%** |
-| 3 MB | 100 KB | **97%** |
-| 1 MB | 50 KB | **95%** |
+Encoding memakai `canvas.toBlob()` secara asynchronous. Foto yang sudah dikompres
+dikirim satu kali sebagai foto utama; thumbnail duplikat yang tidak dipakai endpoint
+submit tidak lagi ikut dikirim.
+
+Ukuran hasil bergantung pada dimensi dan isi gambar. Kompresi mengurangi ukuran
+payload yang dikirim dan menghindari pengiriman thumbnail duplikat.
 
 **Benefits:**
-- ✅ Upload **20x faster**!
-- ✅ Save user's data quota
-- ✅ Perfect for slow 3G/4G
+- ✅ Mengurangi penggunaan data dan waktu upload foto
+- ✅ Encoding gambar tidak memblokir UI selama proses submit
+- ✅ Foto tetap diproses sebelum disimpan ke Google Drive
 - ✅ Still good quality
 
 ---

@@ -1,0 +1,25 @@
+branchId,id,name,type,targetValue,targetPhotos,weight,icon,createdAt
+A336,sales,Sales,number,100000000,,20,DollarSign,2026-05-09T10:00:00Z
+A336,transaksi,Transaksi,number,1000,,15,ShoppingCart,2026-05-09T10:00:00Z
+A336,mgb,MGB,photo,,3,15,Camera,2026-05-09T10:00:00Z
+A336,customer,Customer Baru,number,50,,10,Users,2026-05-09T10:00:00Z
+A336,produk,Produk Baru,number,20,,10,Package,2026-05-09T10:00:00Z
+A336,promo,Promo Active,number,5,,10,Tag,2026-05-09T10:00:00Z
+A336,display,Display Toko,photo,,2,10,Image,2026-05-09T10:00:00Z
+A336,kebersihan,Kebersihan,photo,,1,10,Sparkles,2026-05-09T10:00:00Z
+A416,sales,Sales,number,80000000,,20,DollarSign,2026-05-09T10:00:00Z
+A416,transaksi,Transaksi,number,800,,15,ShoppingCart,2026-05-09T10:00:00Z
+A416,mgb,MGB,photo,,3,15,Camera,2026-05-09T10:00:00Z
+A416,customer,Customer Baru,number,40,,10,Users,2026-05-09T10:00:00Z
+A416,display,Display Toko,photo,,2,10,Image,2026-05-09T10:00:00Z
+A339,sales,Sales,number,120000000,,20,DollarSign,2026-05-09T10:00:00Z
+A339,transaksi,Transaksi,number,1200,,15,ShoppingCart,2026-05-09T10:00:00Z
+A339,mgb,MGB,photo,,3,15,Camera,2026-05-09T10:00:00Z
+A339,customer,Customer Baru,number,60,,10,Users,2026-05-09T10:00:00Z
+A339,promo,Promo Active,number,8,,10,Tag,2026-05-09T10:00:00Z
+A123,sales,Sales,number,90000000,,20,DollarSign,2026-05-09T10:00:00Z
+A123,transaksi,Transaksi,number,900,,15,ShoppingCart,2026-05-09T10:00:00Z
+A123,mgb,MGB,photo,,3,15,Camera,2026-05-09T10:00:00Z
+A456,sales,Sales,number,110000000,,20,DollarSign,2026-05-09T10:00:00Z
+A456,transaksi,Transaksi,number,1100,,15,ShoppingCart,2026-05-09T10:00:00Z
+A456,mgb,MGB,photo,,3,15,Camera,2026-05-09T10:00:00Z

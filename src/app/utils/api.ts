@@ -819,9 +819,8 @@ export const api = {
             .filter(key => key.startsWith(`submissions_${branchId}`))
             .forEach(key => CACHE.delete(key));
 
-          // Apps Script sekarang handle photosThumbs langsung (lihat processPhotos di GAS)
-          console.log(`✅ Submission added successfully`);
-          return true;
+              console.log(`✅ Submission added successfully`);
+              return true;
         } catch (fetchError: any) {
           console.error('❌ Fetch error:', fetchError.message);
           throw new Error(`Apps Script request failed: ${fetchError.message}`);
@@ -845,7 +844,8 @@ export const api = {
         notes: submission.notes || ''
       }, headers);
 
-      await appendToSheet(SHEETS.SUBMISSIONS, [rowData]);
+      const appended = await appendToSheet(SHEETS.SUBMISSIONS, [rowData]);
+      if (!appended) throw new Error('Gagal menyimpan submission ke Google Sheets.');
 
       // Clear cache
       Array.from(CACHE.keys())
@@ -856,7 +856,7 @@ export const api = {
       return true;
     } catch (error) {
       console.error('❌ Error adding submission:', error);
-      return false;
+      throw error;
     }
   },
 

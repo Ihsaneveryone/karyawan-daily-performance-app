@@ -1288,7 +1288,7 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
               Data berhasil disimpan
             </p>
             <h1 className="text-2xl font-bold leading-tight text-gray-900 sm:text-3xl">
-              Shift Kerja Anda Hari Ini Suddah Selesai
+              Shift Kerja Anda Hari Ini Sudah Selesai
             </h1>
             <p className="mt-4 text-gray-600">
               Terima kasih atas kerja keras Anda hari ini, {user.nama}.

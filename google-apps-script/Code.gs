@@ -69,7 +69,7 @@ function getA321PhotoFolder() {
   return folder;
 }
 
-function uploadBase64ToDrive(base64Data, filename, branchId) {
+function uploadBase64ToDrive(base64Data, filename, branchId, targetFolder) {
   try {
     var parts = base64Data.split(',');
     if (parts.length < 2) return null;
@@ -78,15 +78,14 @@ function uploadBase64ToDrive(base64Data, filename, branchId) {
     var fileName = filename + '.' + extension;
     var bytes = Utilities.base64Decode(parts[1]);
     var blob = Utilities.newBlob(bytes, mimeType, fileName);
-    var folder = branchId === 'A321'
+    var folder = targetFolder || (branchId === 'A321'
       ? getA321PhotoFolder()
-      : GDRIVE_FOLDER_ID ? DriveApp.getFolderById(GDRIVE_FOLDER_ID) : null;
+      : GDRIVE_FOLDER_ID ? DriveApp.getFolderById(GDRIVE_FOLDER_ID) : null);
     if (!folder) return null;
 
     var existingFiles = folder.getFilesByName(fileName);
     if (existingFiles.hasNext()) {
       var existingFile = existingFiles.next();
-      existingFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       return 'https://drive.google.com/uc?export=view&id=' + existingFile.getId();
     }
 
@@ -104,6 +103,7 @@ function processPhotos(photos, submissionId, branchId) {
   if (!photos || typeof photos !== 'object') return '';
   var urlMap = {};
   var keys = Object.keys(photos);
+  var targetFolder = null;
   for (var ki = 0; ki < keys.length; ki++) {
     var indicatorId = keys[ki];
     var photoList = photos[indicatorId];
@@ -115,7 +115,12 @@ function processPhotos(photos, submissionId, branchId) {
       if (photo.startsWith('http')) {
         urls.push(photo);
       } else if (photo.startsWith('data:') && (GDRIVE_FOLDER_ID || branchId === 'A321')) {
-        var url = uploadBase64ToDrive(photo, submissionId + '_' + indicatorId + '_' + i, branchId);
+        if (!targetFolder) {
+          targetFolder = branchId === 'A321'
+            ? getA321PhotoFolder()
+            : DriveApp.getFolderById(GDRIVE_FOLDER_ID);
+        }
+        var url = uploadBase64ToDrive(photo, submissionId + '_' + indicatorId + '_' + i, branchId, targetFolder);
         if (url) urls.push(url);
         else throw new Error('Gagal menyimpan foto ' + indicatorId + ' ke Google Drive');
       }
@@ -700,8 +705,20 @@ function addSubmission(submission) {
     // Ekstrak nilai per indikator
     var indValues = extractIndicatorValues(submission.data);
 
-    // Proses foto → URL Drive saja (strip base64)
-    var photosStr = processPhotos(submission.photos || {}, submission.id || 'sub', submission.branchId);
+    var lastSubmissionRow = sheet.getLastRow();
+    var duplicateRow = null;
+    if (submission.id && lastSubmissionRow > 1) {
+      var existingId = sheet.getRange(2, 1, lastSubmissionRow - 1, 1)
+        .createTextFinder(String(submission.id))
+        .matchEntireCell(true)
+        .findNext();
+      if (existingId) duplicateRow = existingId.getRow();
+    }
+
+    // Skip Drive work on retries where this submission was already stored.
+    var photosStr = duplicateRow
+      ? String(sheet.getRange(duplicateRow, 17).getValue() || '')
+      : processPhotos(submission.photos || {}, submission.id || 'sub', submission.branchId);
     var uploadedPhotoUrls = photosStr ? JSON.parse(photosStr) : {};
     Logger.log('Photos stored: ' + photosStr.length + ' chars');
 
@@ -735,13 +752,7 @@ function addSubmission(submission) {
       notesStr                                                      // R: notes
     ];
 
-    var duplicateSubmission = false;
-    var lastSubmissionRow = sheet.getLastRow();
-    if (submission.id && lastSubmissionRow > 1) {
-      duplicateSubmission = sheet.getRange(2, 1, lastSubmissionRow - 1, 1).getDisplayValues()
-        .some(function(row) { return row[0] === submission.id; });
-    }
-    if (!duplicateSubmission) sheet.appendRow(rowData);
+    if (!duplicateRow) sheet.appendRow(rowData);
     if (submission.branchId === 'A321') appendA321Result(submission, uploadedPhotoUrls);
     Logger.log('Row appended. Max cell size: ' + photosStr.length + ' chars (photos)');
 

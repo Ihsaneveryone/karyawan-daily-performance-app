@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Progress } from './ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Textarea } from './ui/textarea';
-import { LogOut, ArrowLeft, TrendingUp, ShoppingCart, DollarSign, Phone, UserPlus, Shield, ThumbsUp, Target, Camera, History, Crown, AlertCircle, CheckCircle, Users, Package, Tag, Image, Sparkles } from 'lucide-react';
+import { LogOut, ArrowLeft, TrendingUp, ShoppingCart, DollarSign, Phone, UserPlus, Shield, ThumbsUp, Target, Camera, History, Crown, AlertCircle, CheckCircle, CheckCircle2, Users, Package, Tag, Image, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Branch, Indicator, IndicatorData, Submission } from '../types';
 import { api } from '../utils/api';
@@ -19,6 +19,72 @@ import { useSettings } from '../hooks/useSettings';
 import { useSubmissions } from '../hooks/useSubmissions';
 import { preSeedCache } from '../utils/preSeedCache';
 import { queryClient } from '../lib/queryClient';
+
+async function prepareSubmissionData(
+  data: Record<string, IndicatorData>,
+  options: { maxWidth: number; maxHeight: number; quality: number }
+): Promise<IndicatorData[]> {
+  const indicators = Object.values(data);
+  const submissionData = new Array<IndicatorData>(indicators.length);
+  let nextIndex = 0;
+
+  const processIndicators = async () => {
+    while (nextIndex < indicators.length) {
+      const index = nextIndex++;
+      const indicatorData = indicators[index];
+      if (!indicatorData.photos?.length) {
+        submissionData[index] = indicatorData;
+        continue;
+      }
+
+      const photos: string[] = [];
+      for (const photo of indicatorData.photos) {
+        if (typeof photo === 'string') {
+          photos.push(photo);
+        } else if (photo instanceof File || photo instanceof Blob) {
+          photos.push(await compressImage(photo, options));
+        } else {
+          throw new Error('Format foto tidak dikenali. Hapus lalu unggah ulang foto tersebut.');
+        }
+      }
+      submissionData[index] = { ...indicatorData, photos };
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(2, indicators.length) }, () => processIndicators())
+  );
+  return submissionData;
+}
+
+function PhotoPreview({ photo, alt, className }: {
+  photo: File | Blob | string;
+  alt: string;
+  className: string;
+}) {
+  const [src, setSrc] = useState('');
+
+  useEffect(() => {
+    if (typeof photo === 'string') {
+      setSrc(photo);
+      return;
+    }
+    if (!(photo instanceof Blob)) {
+      setSrc('');
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(photo);
+    setSrc(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [photo]);
+
+  if (!src) {
+    return <p className="text-xs text-amber-700">Foto perlu diunggah ulang.</p>;
+  }
+
+  return <img src={src} alt={alt} className={className} />;
+}
 
 interface StaffDashboardProps {
   user: any;
@@ -389,11 +455,10 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
   const [notesAdminNik, setNotesAdminNik] = useState('');
   const [notesAdminNama, setNotesAdminNama] = useState('');
 
-  // Draft and offline state
-  const [hasDraft, setHasDraft] = useState(false);
-  const [draftInfo, setDraftInfo] = useState<{ timestamp: number; date: string } | null>(null);
+  // Offline state
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionCompletedAt, setSubmissionCompletedAt] = useState<Date | null>(null);
 
   // Submission date - default hari ini, bisa diedit
   const [submissionDate, setSubmissionDate] = useState<string>(() =>
@@ -514,11 +579,9 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
   // Initialize data when indicators loaded
   useEffect(() => {
     if (indicators.length > 0 && Object.keys(data).length === 0) {
-      // Check draft first
       const draft = draftManager.loadDraft(branch.id, user?.nik || '');
-      if (draft && !hasDraft) {
-        setHasDraft(true);
-        setDraftInfo(draftManager.getDraftInfo(branch.id, user?.nik || ''));
+      if (draft) {
+        setData(draft);
         return;
       }
 
@@ -636,40 +699,6 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
       };
     }
   }, [branch.id, user.nik, data]);
-
-  const restoreDraft = () => {
-    const draft = draftManager.loadDraft(branch.id, user?.nik || '');
-    if (draft) {
-      setData(draft);
-      toast.success('Draft berhasil dimuat!');
-    }
-    setHasDraft(false);
-    setDraftInfo(null);
-  };
-
-  const discardDraft = () => {
-    draftManager.clearDraft(branch.id, user?.nik || '');
-    setHasDraft(false);
-    setDraftInfo(null);
-    toast.info('Draft dihapus');
-
-    // Reset tanggal ke hari ini
-    setSubmissionDate(isA321 ? getJakartaDate() : new Date().toISOString().split('T')[0]);
-
-    // Initialize fresh data
-    const initialData: Record<string, IndicatorData> = {};
-    indicators.forEach(ind => {
-      initialData[ind.id] = {
-        id: ind.id,
-        value: undefined,
-        photos: [],
-        textValue: '',
-        dropdownValue: '',
-        checkboxValue: false
-      };
-    });
-    setData(initialData);
-  };
 
   // ⚡ OPTIMIZED: useMemo untuk calculateScore - tidak re-calculate setiap render!
   const scoreResult = useMemo(() => {
@@ -850,59 +879,16 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
 
     // CLOSE DIALOG FIRST so loading screen is visible
     setShowNotesDialog(false);
-    setNotesReason('');
-    setNotesApproval('');
-    setNotesAdminNik('');
-    setNotesAdminNama('');
 
     // ✅ START SUBMIT (NO OPTIMISTIC UPDATE - wait for server response)
     setIsSubmitting(true);
 
     try {
-      // Compress images and convert to data URLs for storage
-      const submissionData = await Promise.all(
-        Object.values(data).map(async (indicatorData) => {
-          try {
-            if (indicatorData.photos && indicatorData.photos.length > 0) {
-              const photoDataUrls = await Promise.all(
-                indicatorData.photos.map(async (photoItem) => {
-                  // If already a string, return as is
-                  if (typeof photoItem === 'string') {
-                    return photoItem;
-                  }
-
-                  // If File/Blob, COMPRESS then convert
-                  if (photoItem instanceof File || photoItem instanceof Blob) {
-                    try {
-                      // BALANCED compression: 500x500 @ 50%
-                      const compressed = await compressImage(photoItem, {
-                        maxWidth: 500,
-                        maxHeight: 500,
-                        quality: 0.5,
-                      });
-                      return compressed;
-                    } catch (error) {
-                      console.error('Image compression failed:', error);
-                      return ''; // Skip this image
-                    }
-                  }
-
-                  console.warn('Unknown photo item type:', typeof photoItem);
-                  return '';
-                })
-              );
-              return {
-                ...indicatorData,
-                photos: photoDataUrls.filter(url => url.length > 0)
-              };
-            }
-            return indicatorData;
-          } catch (error) {
-            console.error('Error processing indicator data:', error);
-            return indicatorData;
-          }
-        })
-      );
+      const submissionData = await prepareSubmissionData(data, {
+        maxWidth: 400,
+        maxHeight: 400,
+        quality: 0.6
+      });
 
       // 🕐 FIX: Use actual current time WITH TIMEZONE!
       const now = new Date(); // Current local time
@@ -947,7 +933,11 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
 
       if (success) {
         // ✅ SUCCESS - Show message and reset form
-        toast.success('Submit dengan catatan berhasil!');
+        setSubmissionCompletedAt(new Date());
+        setNotesReason('');
+        setNotesApproval('');
+        setNotesAdminNik('');
+        setNotesAdminNama('');
 
         // Reset form to fresh state
         const freshData: Record<string, IndicatorData> = {};
@@ -979,14 +969,15 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
       }
     } catch (error: any) {
       console.error('Error submitting with notes:', error);
+      setShowNotesDialog(true);
 
-      // Clear, helpful error messages
+      const errorMessage = error instanceof Error ? error.message : 'Penyebab tidak diketahui.';
       if (!navigator.onLine) {
-        toast.error('Tidak ada koneksi internet. Data tersimpan dan akan dikirim otomatis saat online.', { duration: 6000 });
+        toast.error('Tidak ada koneksi internet. Submit belum terkirim; data tetap di formulir. Periksa koneksi lalu coba lagi.', { duration: 8000 });
       } else if (error.name === 'AbortError' || error.name === 'TimeoutError') {
-        toast.error('Koneksi sangat lambat (sudah dicoba 3x dalam 60 detik). Data TERSIMPAN di offline queue dan akan dikirim otomatis saat koneksi membaik. Jangan khawatir, data tidak hilang!', { duration: 8000 });
+        toast.error('Server belum merespons. Submit belum dapat dipastikan; data tetap di formulir. Tunggu sebentar sebelum mencoba lagi.', { duration: 8000 });
       } else {
-        toast.error('Gagal mengirim (sudah dicoba 3x). Data TERSIMPAN dan akan dikirim otomatis. Coba lagi nanti atau hubungi admin jika masih bermasalah.', { duration: 7000 });
+        toast.error(`Submit gagal: ${errorMessage}`, { duration: 10000 });
       }
     } finally {
       setIsSubmitting(false);
@@ -1033,43 +1024,11 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
     setIsSubmitting(true);
 
     try {
-      // Compress images first
-      const submissionData = await Promise.all(
-        Object.values(data).map(async (indicatorData) => {
-          try {
-            if (indicatorData.photos && indicatorData.photos.length > 0) {
-              const photoDataUrls = await Promise.all(
-                indicatorData.photos.map(async (photoItem) => {
-                  if (typeof photoItem === 'string') return photoItem;
-
-                  if (photoItem instanceof File || photoItem instanceof Blob) {
-                    try {
-                      // FAST compression: 400x400 @ 60% - Good balance!
-                      const compressed = await compressImage(photoItem, {
-                        maxWidth: 400,
-                        maxHeight: 400,
-                        quality: 0.6,
-                      });
-                      return compressed;
-                    } catch (error) {
-                      console.error('Image compression failed:', error);
-                      return '';
-                    }
-                  }
-                  return '';
-                })
-              );
-              return {
-                ...indicatorData,
-                photos: photoDataUrls.filter((url: string) => url.length > 0)
-              };
-            }
-            return indicatorData;
-          } catch (error) {
-            return indicatorData;
-          }
-        })
-      );
+      const submissionData = await prepareSubmissionData(data, {
+        maxWidth: 400,
+        maxHeight: 400,
+        quality: 0.6
+      });
 
       // 🕐 FIX: Use actual current time WITH TIMEZONE!
       const now = new Date(); // Current local time
@@ -1114,7 +1073,7 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
 
       if (success) {
         // ✅ SUCCESS - Show message and reset form
-        toast.success(isA321 ? 'Submit data berhasil!' : motivationMessage, { duration: 3000 });
+        setSubmissionCompletedAt(new Date());
 
         // Reset form to fresh state
         const freshData: Record<string, IndicatorData> = {};
@@ -1147,20 +1106,20 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
     } catch (error: any) {
       console.error('Submit error:', error);
 
-      // Clear, helpful error messages
+      const errorMessage = error instanceof Error ? error.message : 'Penyebab tidak diketahui.';
       if (!navigator.onLine) {
-        toast.error('Tidak ada koneksi internet. Data tersimpan dan akan dikirim otomatis saat online.', { duration: 6000 });
+        toast.error('Tidak ada koneksi internet. Submit belum terkirim; data tetap di formulir. Periksa koneksi lalu coba lagi.', { duration: 8000 });
       } else if (error.name === 'AbortError' || error.name === 'TimeoutError') {
-        toast.error('Koneksi sangat lambat (sudah dicoba 3x dalam 60 detik). Data TERSIMPAN di offline queue dan akan dikirim otomatis saat koneksi membaik. Jangan khawatir, data tidak hilang!', { duration: 8000 });
+        toast.error('Server belum merespons. Submit belum dapat dipastikan; data tetap di formulir. Tunggu sebentar sebelum mencoba lagi.', { duration: 8000 });
       } else {
-        toast.error('Gagal mengirim (sudah dicoba 3x). Data TERSIMPAN dan akan dikirim otomatis. Coba lagi nanti atau hubungi admin jika masih bermasalah.', { duration: 7000 });
+        toast.error(`Submit gagal: ${errorMessage}`, { duration: 10000 });
       }
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleInputChange = (indicatorId: string, value: number) => {
+  const handleInputChange = (indicatorId: string, value: number | undefined) => {
     // ⚡ OPTIMISTIC UPDATE: Update UI immediately (no waiting!)
     const newData = {
       ...data,
@@ -1172,8 +1131,12 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
 
     // 🔄 AUTO-CALCULATE BASKET SIZE when Sales or Trx changes
     if (indicatorId === 'sales' || indicatorId === 'trx' || indicatorId === 'transaksi') {
-      const salesValue = indicatorId === 'sales' ? value : (data['sales']?.value || 0);
-      const trxValue = indicatorId === 'trx' ? value : (indicatorId === 'transaksi' ? value : (data['trx']?.value || data['transaksi']?.value || 0));
+      const salesValue = indicatorId === 'sales' ? (value || 0) : (data['sales']?.value || 0);
+      const trxValue = indicatorId === 'trx'
+        ? (value || 0)
+        : indicatorId === 'transaksi'
+          ? (value || 0)
+          : (data['trx']?.value || data['transaksi']?.value || 0);
 
       // Calculate Basket Size = Sales / Trx
       const basketSize = trxValue > 0 ? Math.round(salesValue / trxValue) : 0;
@@ -1311,6 +1274,51 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
     (indicators.length === 0 && indicatorsFetching)
     || (indicators.length > 0 && !a321Metrics && !a321MetricsError)
   );
+
+  if (submissionCompletedAt) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4 flex items-center justify-center">
+        <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-emerald-100 bg-white shadow-xl">
+          <div className="h-2 bg-gradient-to-r from-emerald-400 via-teal-500 to-emerald-500" />
+          <div className="px-6 py-10 text-center sm:px-10">
+            <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100">
+              <CheckCircle2 className="h-12 w-12 text-emerald-600" strokeWidth={1.8} />
+            </div>
+            <p className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
+              Data berhasil disimpan
+            </p>
+            <h1 className="text-2xl font-bold leading-tight text-gray-900 sm:text-3xl">
+              Shift Kerja Anda Hari Ini Suddah Selesai
+            </h1>
+            <p className="mt-4 text-gray-600">
+              Terima kasih atas kerja keras Anda hari ini, {user.nama}.
+            </p>
+            <p className="mt-2 text-gray-600">
+              Semoga perjalanan pulang lancar. Hati-hati di jalan!
+            </p>
+            <p className="mt-6 text-sm text-gray-400">
+              Tersimpan pada {submissionCompletedAt.toLocaleString('id-ID', {
+                dateStyle: 'long',
+                timeStyle: 'short'
+              })}
+            </p>
+            <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+              <Button
+                onClick={() => setSubmissionCompletedAt(null)}
+                className="h-11 bg-emerald-600 px-6 hover:bg-emerald-700"
+              >
+                Kembali ke halaman utama
+              </Button>
+              <Button variant="outline" onClick={onLogout} className="h-11 px-6">
+                <LogOut className="mr-2 h-4 w-4" />
+                Keluar
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isA321MenuLoading) {
     return (
@@ -1875,44 +1883,6 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
           </div>
         )}
 
-        {/* Draft Notification */}
-        {hasDraft && draftInfo && (
-          <div className="bg-yellow-100 border-2 border-yellow-500 rounded-lg p-3 mb-4">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-yellow-800">Draft Tersimpan</p>
-                <p className="text-xs text-yellow-700 mb-2">
-                  Terakhir disimpan: {new Date(draftInfo.timestamp).toLocaleString('id-ID')}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={restoreDraft}
-                    className="bg-yellow-600 hover:bg-yellow-700 text-white h-8 text-xs"
-                  >
-                    Pulihkan Draft
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={discardDraft}
-                    className="border-yellow-600 text-yellow-700 hover:bg-yellow-50 h-8 text-xs"
-                  >
-                    Hapus Draft
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Auto-save Indicator */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-4 flex items-center gap-2 text-xs text-blue-700">
-          <CheckCircle className="w-4 h-4" />
-          <span>Auto-save aktif - Data tersimpan otomatis setiap 30 detik</span>
-        </div>
-
         {/* Score Card - RESPONSIVE */}
         <Card className={`mb-4 md:mb-6 border-2 ${isA321 ? 'border-gray-200 bg-white' : scoreColor}`}>
           <CardContent className="pt-4 md:pt-6 px-4 md:px-6">
@@ -2023,7 +1993,7 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
                           : ''}
                         onChange={(e) => {
                           const formatted = formatNumberInput(e.target.value);
-                          const numValue = parseFormattedNumber(formatted);
+                          const numValue = formatted ? parseFormattedNumber(formatted) : undefined;
                           handleInputChange(indicator.id, numValue);
                         }}
                         disabled={isA321AutoInput || indicator.id === 'basket' || indicator.id === 'basketSize'}
@@ -2060,8 +2030,8 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
                               {inputData.photos.map((photo, photoIndex) => (
                                 <div key={`${indicator.id}-${photoIndex}`} className="space-y-1">
                                   {photo && (
-                                    <img
-                                      src={typeof photo === 'string' ? photo : URL.createObjectURL(photo)}
+                                    <PhotoPreview
+                                      photo={photo}
                                       alt={`Preview MGB ${photoIndex + 1}`}
                                       className="aspect-square w-full rounded border border-gray-300 object-cover"
                                     />
@@ -2127,23 +2097,11 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
                                 {/* Photo Preview */}
                                 {hasPhoto && photo && (
                                   <div className="mt-1">
-                                    {typeof photo === 'string' && photo.startsWith('data:') && (
-                                      <img
-                                        src={photo}
-                                        alt={`Foto ${photoIndex + 1}`}
-                                        className="w-20 h-20 object-cover rounded border border-gray-300"
-                                      />
-                                    )}
-                                    {typeof photo === 'string' && !photo.startsWith('data:') && (
-                                      <p className="text-xs text-gray-500">Foto tersimpan</p>
-                                    )}
-                                    {(photo instanceof File || photo instanceof Blob) && (
-                                      <img
-                                        src={URL.createObjectURL(photo)}
-                                        alt={`Foto ${photoIndex + 1}`}
-                                        className="w-20 h-20 object-cover rounded border border-gray-300"
-                                      />
-                                    )}
+                                    <PhotoPreview
+                                      photo={photo}
+                                      alt={`Foto ${photoIndex + 1}`}
+                                      className="w-20 h-20 object-cover rounded border border-gray-300"
+                                    />
                                   </div>
                                 )}
                               </div>
@@ -2178,20 +2136,11 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
                               {/* Preview for single photo */}
                               {inputData.photos[0] && (
                                 <>
-                                  {typeof inputData.photos[0] === 'string' && inputData.photos[0].startsWith('data:') && (
-                                    <img
-                                      src={inputData.photos[0]}
-                                      alt="Preview"
-                                      className="w-20 h-20 object-cover rounded border border-gray-300"
-                                    />
-                                  )}
-                                  {(inputData.photos[0] instanceof File || inputData.photos[0] instanceof Blob) && (
-                                    <img
-                                      src={URL.createObjectURL(inputData.photos[0])}
-                                      alt="Preview"
-                                      className="w-20 h-20 object-cover rounded border border-gray-300"
-                                    />
-                                  )}
+                                  <PhotoPreview
+                                    photo={inputData.photos[0]}
+                                    alt="Preview"
+                                    className="w-20 h-20 object-cover rounded border border-gray-300"
+                                  />
                                 </>
                               )}
                             </div>
@@ -2313,7 +2262,7 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
             {isA321
               ? a321MetricsLoading ? 'Memuat Data Spreadsheet...'
                 : a321MetricsError ? 'Data Spreadsheet Tidak Tersedia'
-                  : canSubmit ? 'Submit Data' : 'Lengkapi Semua Indikator'
+                  : canSubmit ? 'Submit' : 'Lengkapi Semua Indikator'
               : canSubmit ? `Submit Data (Score: ${totalScore}%)` : `Submit Tidak Tersedia (Minimal ${minSubmitScore}%, Sekarang: ${totalScore}%)`}
           </Button>
 

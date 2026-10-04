@@ -79,7 +79,19 @@ export class DraftManager {
       }
 
       console.log('Draft loaded:', draftKey);
-      return draft.data;
+      return Object.fromEntries(
+        Object.entries(draft.data || {}).map(([indicatorId, value]) => {
+          const indicatorData = value as IndicatorData;
+          return [indicatorId, {
+            ...indicatorData,
+            photos: Array.isArray(indicatorData.photos)
+              ? indicatorData.photos.filter(photo =>
+                  typeof photo === 'string' || (typeof Blob !== 'undefined' && photo instanceof Blob)
+                )
+              : []
+          }];
+        })
+      );
     } catch (error) {
       console.error('Error loading draft:', error);
       return null;

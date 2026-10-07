@@ -795,6 +795,8 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
     const a321MetricKey = isA321 ? getA321MetricKey(indicator) : null;
     const normalized = normalizeIndicatorKey(indicator.id) + normalizeIndicatorKey(indicator.name);
     const isA321Basket = isA321 && (normalized.includes('basket') || normalized.includes('basketsize'));
+    const isA321Mgb = isA321 && normalizeIndicatorKey(indicator.id) === 'mgb';
+    if (isA321Mgb && !inputData?.textValue?.trim()) return true;
     if (indicator.type === 'number' || indicator.type === 'number+photo') {
       if (!inputData || inputData.value === undefined || inputData.value === null) return true;
       if (isA321 && (a321MetricKey || isA321Basket) && !a321Metrics) return true;
@@ -1937,6 +1939,7 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
             );
             const isA321Rupiah = isA321 && (a321MetricKey === 'sales' || isA321Basket);
             const isA321AutoInput = isA321 && a321MetricKey !== null;
+            const isA321Mgb = isA321 && normalizeIndicatorKey(indicator.id) === 'mgb';
             const a321Target = indicator.type === 'photo' ? indicator.targetPhotos : indicator.targetValue;
             const a321Actual = indicator.type === 'photo'
               ? inputData.photos?.length || 0
@@ -1980,6 +1983,22 @@ export default function StaffDashboard({ user, branch, onLogout, onBack }: Staff
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {isA321Mgb && (
+                    <div className="space-y-2">
+                      <label htmlFor={`mgb-description-${indicator.id}`} className="text-sm font-medium">
+                        Keterangan <span className="text-red-600">*</span>
+                      </label>
+                      <Input
+                        id={`mgb-description-${indicator.id}`}
+                        type="text"
+                        placeholder="Contoh: Area Section Chemical Cleaning"
+                        value={inputData.textValue || ''}
+                        onChange={(e) => handleTextChange(indicator.id, e.target.value)}
+                        required
+                      />
+                      <p className="text-xs text-gray-500">Wajib diisi sebelum mengirim foto MGB.</p>
+                    </div>
+                  )}
                   {(indicator.type === 'number' || indicator.type === 'number+photo') && (
                     <div className="space-y-2">
                       <label className="text-sm font-medium">

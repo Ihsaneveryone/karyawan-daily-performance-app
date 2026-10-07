@@ -466,25 +466,45 @@ function ensureA321ResultSheet(spreadsheet, photoHeaders) {
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
-    return { sheet: sheet, headers: headers };
-  }
-
-  if (lastColumn === 0) throw new Error('Sheet RESULT berisi data tanpa header');
-  var existingHeaders = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
-  if (existingHeaders.every(function(header) { return !String(header).trim(); })) {
-    throw new Error('Sheet RESULT berisi data tanpa header');
-  }
-
-  var newHeaders = headers.filter(function(header) { return existingHeaders.indexOf(header) < 0; });
-  if (newHeaders.length > 0) {
-    var requiredLastColumn = lastColumn + newHeaders.length;
-    if (requiredLastColumn > sheet.getMaxColumns()) {
-      sheet.insertColumnsAfter(sheet.getMaxColumns(), requiredLastColumn - sheet.getMaxColumns());
+  } else {
+    if (lastColumn === 0) throw new Error('Sheet RESULT berisi data tanpa header');
+    var existingHeaders = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
+    if (existingHeaders.every(function(header) { return !String(header).trim(); })) {
+      throw new Error('Sheet RESULT berisi data tanpa header');
     }
-    sheet.getRange(1, lastColumn + 1, 1, newHeaders.length).setValues([newHeaders]);
-    existingHeaders = existingHeaders.concat(newHeaders);
+
+    var newHeaders = headers.filter(function(header) { return existingHeaders.indexOf(header) < 0; });
+    if (newHeaders.length > 0) {
+      var requiredLastColumn = lastColumn + newHeaders.length;
+      if (requiredLastColumn > sheet.getMaxColumns()) {
+        sheet.insertColumnsAfter(sheet.getMaxColumns(), requiredLastColumn - sheet.getMaxColumns());
+      }
+      sheet.getRange(1, lastColumn + 1, 1, newHeaders.length).setValues([newHeaders]);
+    }
   }
-  return { sheet: sheet, headers: existingHeaders };
+
+  var mgbColumn = 26;
+  if (sheet.getMaxColumns() < mgbColumn) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), mgbColumn - sheet.getMaxColumns());
+  }
+  var mgbHeaderCell = sheet.getRange(1, mgbColumn);
+  var mgbHeader = String(mgbHeaderCell.getDisplayValue() || '').trim();
+  if (mgbHeader && mgbHeader !== 'Keterangan MGB') {
+    throw new Error('Kolom Z pada sheet RESULT sudah digunakan (' + mgbHeader + '), data tidak ditimpa.');
+  }
+  if (!mgbHeader) {
+    var resultLastRow = sheet.getLastRow();
+    if (resultLastRow > 1) {
+      var existingMgbColumnData = sheet.getRange(2, mgbColumn, resultLastRow - 1, 1).getDisplayValues();
+      if (existingMgbColumnData.some(function(row) { return String(row[0] || '').trim() !== ''; })) {
+        throw new Error('Kolom Z pada sheet RESULT berisi data lama tanpa header, data tidak ditimpa.');
+      }
+    }
+    mgbHeaderCell.setValue('Keterangan MGB');
+  }
+
+  var resultHeaders = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), mgbColumn)).getDisplayValues()[0];
+  return { sheet: sheet, headers: resultHeaders };
 }
 
 function blobFromA321DataUrl(dataUrl, filename) {
@@ -539,6 +559,7 @@ function appendA321Result(submission, photoUrls) {
   headers.forEach(function(header, index) {
     if (Object.prototype.hasOwnProperty.call(valuesByHeader, header)) row[index] = valuesByHeader[header];
   });
+  row[25] = getA321IndicatorValue(submission.data, ['mgb']);
   photoFields.forEach(function(field) {
     var photoHeaderIndex = headers.indexOf(field.header);
     if (photoHeaderIndex >= 0) row[photoHeaderIndex] = '';
